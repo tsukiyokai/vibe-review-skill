@@ -1,13 +1,12 @@
 # @tsukiyokai/vibe-review
 
-[![npm](https://img.shields.io/npm/v/@tsukiyokai/vibe-review)](https://www.npmjs.com/package/@tsukiyokai/vibe-review)
-
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)的代码审查skill —— 结构化、置信度分级、标准感知。支持C++和Python。
 
 ## 快速开始
 
+使用 `npx skills add`:
 ```bash
-npx @tsukiyokai/vibe-review --global
+npx skills add tsukiyokai/vibe-review-skill
 ```
 
 安装后在Claude Code中即可使用：
@@ -87,15 +86,11 @@ CHK_SAFETY_FUNC_RET(ret);
 ## 安装 / 卸载
 
 ```bash
-# 全局安装 — 所有项目可用
-npx @tsukiyokai/vibe-review --global
 
-# 项目级安装 — 仅当前项目可用
-npx @tsukiyokai/vibe-review
+npx skills add tsukiyokai/vibe-review-skill
 
 # 卸载
-npx @tsukiyokai/vibe-review --remove --global
-npx @tsukiyokai/vibe-review --remove
+npx skills rm --global vibe-review
 ```
 
 ## 自定义
