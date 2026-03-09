@@ -1,14 +1,6 @@
 # 【项目级】HCCL项目规则
 
-## 1 网络安全
-
-### 规则 1.1 token认证类信息属于华为公司产品网络安全红线中规定的敏感信息，禁止打印。
-
-### 规则 1.2 在UB芯片上，当前只需要关注tokenId和tokenValue不能打印。
-
-### 规则 1.3 当前RDMA协议中使用的rkey和lkey信息不用于鉴权功能，仅作为索引辅助硬件找到注册的内存，因此不属于敏感信息。
-
-## 2 HCCL项目级编码规则
+## 1 HCCL项目级编码规则
 
 - tokenId/tokenValue禁止入日志（网络安全红线）。RDMA rkey/lkey不属于敏感信息（避免误报）
 - 返回值：用 `CHK_RET()` 检查，仅日志用 `CHK_PRT()`
@@ -16,7 +8,7 @@
 - 内存分配：堆上用 `NEW_NOTHROW`，智能指针用 `CHK_SMART_PTR_NULL()` 检查
 - 错误上报：输入 `RPT_INPUT_ERR`，环境 `RPT_ENV_ERR`，内部 `RPT_INNER_ERR_PRT`，外调 `RPT_CALL_ERR`
 
-## 3 高价值缺陷模式
+## 2 高价值缺陷模式
 
 HCCL实际审查中发现的高频严重缺陷，保持高度敏感：
 
@@ -33,7 +25,7 @@ HCCL实际审查中发现的高频严重缺陷，保持高度敏感：
 11. 通信算子融合同步缺失：多轮计算和集合通信之间需增加核间同步
 12. 差一错误：循环边界、`\0`终结符、数组长度计算中的off-by-one
 
-基于hcomm仓库428次提交的完整git历史分析，从84次缺陷相关提交（占比19.6%）中提炼的48条高价值审查规则。每条规则均有commit证据和实际代码支撑。84条缺陷的直接覆盖率77%，含间接覆盖约90%。
+基于hcomm仓库428次提交(84次缺陷, 19.6%)、hcomm-dev仓库488次提交(162次缺陷, 33.1%)、hccl-dev仓库133次提交(10次缺陷, 7.5%)的完整git历史分析，共1049次提交中256次缺陷相关提交，提炼的80条高价值审查规则。每条规则均有commit证据和实际代码支撑。
 
 ### 严重等级定义
 
@@ -322,7 +314,7 @@ if (ret == 0 && interfaceVersion >= RA_RS_OPCODE_BASE_VERSION) {
 - 新增引擎类型后须全局grep所有按引擎分支的代码确认归属
 - 按设备类型分支时审查各分支功能等价性
 
-关联commit: `099fe2a8`（心跳socket类型判断不一致）, `07c52708`（910_95 profiling不兼容）, `91fbd1d6`（A3 AIV跨节点回退1700行）, `9d75f557`（AIV引擎归入CPU分支）
+关联commit: `099fe2a8`（心跳socket类型判断不一致）, `07c52708`（910_95 profiling不兼容）, `91fbd1d6`（A3 AIV跨节点回退1700行）, `9d75f557`（AIV引擎归入CPU分支）, hcomm-dev `802c0411`/`c6f8cc36`（枚举/类型分支遗漏7例）, hccl-dev `19d20206`（设备类型判断遗漏环境变量组合条件）
 
 ---
 
@@ -364,7 +356,7 @@ u32 devicePort{DEFAULT_VALUE_DEVICEPORT};
 - op_base.cc中所有公开API须有HCCLV2_FUNC_RUN分发（可自动化扫描）
 - 字符串到枚举映射表中key须与枚举值名称一致
 
-关联commit: `6383b2bc`（HcclGetCommConfigCapability缺分发）, `edf73e80`（协议名字符串映射不匹配）
+关联commit: `6383b2bc`（HcclGetCommConfigCapability缺分发）, `edf73e80`（协议名字符串映射不匹配）, hcomm-dev `e25c6484`（HcclGetHcclBuffer等多个API缺少V2分发, 5例）
 
 ---
 
@@ -401,7 +393,7 @@ tail++;
 - "先写数据、后更新标志位"模式必须在两步之间插入memory fence
 - 跨线程/跨进程的共享内存通信，标志位更新前须有acquire-release语义保证
 
-关联commit: `0947b660`
+关联commit: `0947b660`, hcomm-dev `a014e919`（HDCommunicate::Write中memcpy与tailCnt更新间缺屏障）
 
 ---
 
@@ -468,7 +460,7 @@ ret = ResetOpRetryException(param.opType);        // 最后reset状态
 - publish ordering原则：先完成实际清理/初始化工作，再修改对外可见的状态标志
 - 状态重置函数调用应在所有资源清理操作之后
 
-关联commit: `75659d24`
+关联commit: `75659d24`, hcomm-dev `4d1a3a60`/`08b2658a`/`87da187b`（先启动线程后设标志、executor_过早置nullptr等执行顺序错误5例）
 
 ---
 
@@ -505,7 +497,7 @@ HcclResult DispatcherCtx::Destroy()
 - delete后置nullptr的模式在多线程环境下不安全，必须加锁
 - 审查所有Destroy/Cleanup函数是否可能被并发调用
 
-关联commit: `36994739`
+关联commit: `36994739`, hcomm-dev `7be3b8b8`/`cd056a5e`（DispatcherCtx::Destroy并发delete、reqHandle异步引用时直接free等3例）
 
 ---
 
@@ -590,6 +582,69 @@ int32_t HcommAcquireComm(const char* commId)
 
 ---
 
+#### 规则 CON-08: 全局/静态变量无锁访问
+
+严重等级: P0
+
+缺陷描述: static全局变量在多线程/多流场景下被并发读写，无任何同步机制。通信框架天然多线程（多device、多通信域、主线程+后台轮询线程），18个热点文件中15个存在此类问题。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — static全局数组在MC2多流场景下被多线程并发写
+static uint8_t g_expectPrepareId[MAX_QUE_NUM];  // 多线程写同一位置
+// 线程A: g_expectPrepareId[queueId] = idA;
+// 线程B: g_expectPrepareId[queueId] = idB;  // 覆盖线程A的写入 -> 消息ID不匹配 -> hang
+
+// 修复 — 改为thread_local
+static thread_local uint8_t g_expectPrepareId[MAX_QUE_NUM];
+```
+
+审查检查方法:
+- static全局变量在多线程场景下是否需要thread_local或显式同步?
+- 对static/全局变量的新增或修改，必须标注线程安全声明（thread_local/互斥锁/仅单线程访问）
+
+关联commit: hcomm-dev `341e7893`
+
+---
+
+#### 规则 CON-09: TOCTOU竞态
+
+严重等级: P1
+
+缺陷描述: 持锁检查后释放锁再操作，检查结果在释放锁后失效。两线程可同时通过"不存在"检查，各自创建同名资源导致覆盖。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 持锁检查group不存在后解锁再创建，两线程可同时通过检查
+{
+    std::lock_guard<std::mutex> lock(groupMutex_);
+    if (groupMap_.find(groupName) != groupMap_.end()) {
+        return HCCL_E_EXIST;
+    }
+}  // 解锁
+// 窗口期: 另一个线程也通过了检查
+CHK_RET(CreateGroup(groupName));  // 两个线程都创建同名group
+
+// 修复 — 检查和创建在同一临界区内
+{
+    std::lock_guard<std::mutex> lock(groupMutex_);
+    if (groupMap_.find(groupName) != groupMap_.end()) {
+        return HCCL_E_EXIST;
+    }
+    CHK_RET(CreateGroup(groupName));
+    groupMap_[groupName] = group;
+}
+```
+
+审查检查方法:
+- 持锁检查结果是否在解锁后被使用（TOCTOU）? 操作和检查是否在同一个临界区内?
+
+关联commit: hcomm-dev `7b12579d`
+
+---
+
 ### 类别四：日志与调试（8次，9.5%）
 
 可审查性高，多数可通过编译器警告或lint工具自动捕获。
@@ -605,7 +660,7 @@ int32_t HcommAcquireComm(const char* commId)
 - `std::string`传入C格式化函数须用`.c_str()`
 - 禁止字符串字面量中用 `\` 续行（会将下一行前导空格纳入字符串）
 
-关联commit: `35e32c7c`（%s传入int）, `6a6eac0f`（u64用%u、u32用%llu）
+关联commit: `35e32c7c`（%s传入int）, `6a6eac0f`（u64用%u、u32用%llu）, hcomm-dev `5e446705`/`f715f167`（%s传int导致段错误、%u打印指针等4例）
 
 ---
 
@@ -638,6 +693,48 @@ int32_t HcommAcquireComm(const char* commId)
 
 ---
 
+#### 规则 LOG-04: 日志洪泛/变量引用错误
+
+严重等级: P3
+
+缺陷描述: 高频路径无日志抑制导致刷屏；日志中引用已被修改的累积值而非原始值，导致日志信息误导排查。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 高频opcode每次调用都打印debug日志
+HcclResult RaGetOpRight(u32 opcode) {
+    HCCL_DEBUG("get op right for opcode[%u]", opcode);  // 高频刷屏
+    ...
+}
+
+// 修复 — 引入日志抑制机制
+HcclResult RaGetOpRight(u32 opcode) {
+    if (!RaIsOpcodeLogSuppressed(opcode)) {
+        HCCL_DEBUG("get op right for opcode[%u]", opcode);
+    }
+    ...
+}
+```
+
+```cpp
+// 缺陷 — 日志打印使用了已被累加额外预留空间的scratchBufSize
+scratchBufSize += extraReserve;
+HCCL_INFO("cclBufferSize[%llu]", scratchBufSize);  // 打印的是累加后的值
+
+// 修复 — 在累加前记录原始值
+HCCL_INFO("cclBufferSize[%llu]", cclBufferSize);   // 使用原始变量名
+scratchBufSize += extraReserve;
+```
+
+审查检查方法:
+- 日志中引用的变量是否是当前值而非已被修改的累积值?
+- 高频调用路径上的日志是否有抑制/采样机制?
+
+关联commit: hcomm-dev `4425a342`, `802c0411`
+
+---
+
 ### 类别五：资源生命周期（8次，9.5%）
 
 资源的创建、使用、销毁三阶段管理不当。
@@ -652,7 +749,7 @@ int32_t HcommAcquireComm(const char* commId)
 - 函数包含多个early return时，逐一审查每个return路径是否遗漏后续必要初始化/清理
 - 调试用的`return HCCL_SUCCESS`须在提交前移除（lint可检测unreachable code）
 
-关联commit: `82989927`（early return跳过TpManager::Init）, `c5443da0`（调试遗留return跳过整个逻辑）
+关联commit: `82989927`（early return跳过TpManager::Init）, `c5443da0`（调试遗留return跳过整个逻辑）, hcomm-dev `d8400fd2`/`bc8c5036`（hrtMalloc在CHK_RET失败路径未释放、buffer插入后Init失败残留等4例）
 
 ---
 
@@ -705,6 +802,55 @@ int32_t HcommAcquireComm(const char* commId)
 - 析构函数中的日志/DFX调用应在所有资源释放操作之前（避免日志依赖先被销毁）
 
 关联commit: `a9fea200`（refCount>1分支遗漏释放handle）, `7d914168`（析构顺序错误导致日志依赖先销毁）
+
+---
+
+#### 规则 RES-05: 资源释放顺序错误/释放后未置空
+
+严重等级: P0
+
+缺陷描述: 组件间存在资源依赖，析构顺序不正确导致UAF或报错。释放后handle/指针未置空导致重入时double free。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — communicator析构时先销毁AlgResource，
+// 但ChannelManager中持有的transport link依赖底层资源已被清理
+HcclCommunicator::~HcclCommunicator() {
+    DestroyAlgResource();       // 先释放算法资源
+    // channelManager_析构时transport link访问已释放资源 -> 报错
+}
+
+// 修复 — 新增releaseChannel_()回调注入析构流程
+HcclCommunicator::~HcclCommunicator() {
+    DestroyAlgResource();
+    releaseChannel_();  // 通过回调释放channel transport，避免UAF
+}
+```
+
+```cpp
+// 缺陷 — UnimportAllJetty释放资源后handle仍保留旧值，重入时double free
+void CcuComponent::UnimportAllJetty() {
+    for (auto &jetty : jettyList_) {
+        UrmaUnimportJetty(jetty.handle);
+        // 遗漏: jetty.handle = INVALID_HANDLE;
+    }
+}
+
+// 修复 — 释放后立即置空
+void CcuComponent::UnimportAllJetty() {
+    for (auto &jetty : jettyList_) {
+        UrmaUnimportJetty(jetty.handle);
+        jetty.handle = INVALID_HANDLE;  // 防止重入double free
+    }
+}
+```
+
+审查检查方法:
+- 当组件A持有组件B创建的资源引用时，析构流程是否保证A的引用先释放?
+- 资源释放后是否立即将handle/指针置空?
+
+关联commit: hcomm-dev `f45581ee`, `e17cfff4`
 
 ---
 
@@ -836,7 +982,7 @@ if (ret != 0) {
 - `-ENOTSUPP`、`-EOPNOTSUPP`、`HCCL_E_NOT_SUPPORT`等返回值应用warn而非error
 - error级别日志应保留给真正需要人工介入的错误
 
-关联commit: `2fcde546`
+关联commit: `2fcde546`, hcomm-dev `6972024c`/`2adb85d7`（CHK_RET宏在可恢复场景隐式打ERROR、AIV fallback等3例）
 
 ---
 
@@ -892,7 +1038,7 @@ cacheInfo.resourceArgs.stream = opParam.stream.ptr();  // 刷新stream
 - 句柄类字段（stream、context、device handle）几乎总需要刷新
 - 缓存用于恢复逻辑时检查是否保存了所有依赖的输入状态
 
-关联commit: `43dab3e2`（stream未刷新）, `dd053d5b`（algName未随缓存恢复）
+关联commit: `43dab3e2`（stream未刷新）, `dd053d5b`（algName未随缓存恢复）, hcomm-dev `3c24c0fe`/`b3975b85`（ExecOpCache中stream字段和workflowMode维度缺失3例）
 
 ---
 
@@ -988,7 +1134,7 @@ if (hcclDumpInfo.size() > 0) {
 - IPC共享内存注册前检查是否已注册同一块内存
 - bool成员变量默认false且在多处以`!flag`守护资源分配时，检查所有初始化路径是否都有flag设置
 
-关联commit: `3ec7410b`（IPC重复注册OOM）, `b2e74aee`（SetMemIncludeFlag遗漏调用）
+关联commit: `3ec7410b`（IPC重复注册OOM）, `b2e74aee`（SetMemIncludeFlag遗漏调用）, hcomm-dev `f64f6498`/`9277e023`（P2P传输中input/output在CCL buffer范围内仍独立IPC注册等4例）
 
 ---
 
@@ -1023,7 +1169,7 @@ bool HcclCommunicator::IsSupportSymmetricMemory(HcclCMDType opType, OpParam &opP
 - 新增对可选成员的使用时，须确认所有初始化路径是否都覆盖了该成员的创建
 - 构造函数/Init中有条件分支跳过某些成员初始化时，标记这些成员为"可选"并在使用处强制判空
 
-关联commit: `4e0bd97b`
+关联commit: `4e0bd97b`, hcomm-dev `a2b86b3d`/`384d78c0`（可选指针/新增参数校验缺失2例）
 
 ---
 
@@ -1053,7 +1199,7 @@ u64 count = hcomOpParam->count;  // 保持u64
 - 涉及内存大小计算的表达式必须使用u64
 - 编译选项开启 `-Wconversion -Werror=conversion`
 
-关联commit: `9c1f957b`
+关联commit: `9c1f957b`, hcomm-dev `4ebb11d1`/`7a3d6fa6`（u32超时值通过u8返回类型截断等4例）
 
 ---
 
@@ -1165,7 +1311,7 @@ CcuKernel::~CcuKernel() {}  // 显式定义在单一TU，确保符号导出
 - 修复一处缺陷后，全局搜索相似代码段是否有同样问题
 - 对重复代码优先重构为共享函数，从根本上消除"修一漏一"
 
-关联证据: hccl_communicator_host.cc（ExecOp重复）, aicpu_communicator.cc（AllocTransportResource三路重复）, communicator_impl.cc（5个初始化路径）
+关联证据: hccl_communicator_host.cc（ExecOp重复）, aicpu_communicator.cc（AllocTransportResource三路重复）, communicator_impl.cc（5个初始化路径）, hcomm-dev `36c8449d`/`fd23d1b6`（全局重命名后测试代码未同步5例）, hccl-dev `2d8d548a`（API参数名blockDim→numBlocks后调用侧未同步）
 
 ---
 
@@ -1237,6 +1383,915 @@ CcuKernel::~CcuKernel() {}  // 显式定义在单一TU，确保符号导出
 | TLV解析死循环 | aicpu_communicator.cc L659 | length==0时while循环无法前进 |
 | 锁策略不一致 | aicpu_communicator.cc resMap_ | 同一数据结构两种锁保护 |
 
+#### 规则 SYS-07: 公共API/ABI设计债务
+
+严重等级: P1
+
+缺陷描述: 公共头文件中存在严重的ABI兼容性问题:
+- hcom.h: extern "C"块内使用namespace、公共函数签名含C++默认参数、头文件中定义non-inline std::string/std::map全局变量
+- hccl_comm_pub.h: 条件编译(CCL_KERNEL_AICPU/HCCD)改变类内存布局，跨模块传指针越界
+- 多个API返回悬垂指针: `*algo = const_cast<char*>(str.c_str())`将局部变量内部指针返回（确定性UAF）
+- 动态库导出函数用std::string&参数，跨ABI不兼容
+
+审查检查方法:
+- 公共头文件(pkg_inc/)的任何修改必须通过ABI兼容性checklist审查
+- 公共头文件仅使用标准C/C++类型，禁止内部typedef
+- 动态库导出函数(extern "C")的参数和返回值必须为POD类型
+- stub符号与实际函数签名是否匹配
+
+关联commit: hcomm-dev `30e25e50`/`7fccc101`/`e6d12932`（ABI兼容性/符号导出5例）
+
+---
+
+### 类别十二：构建/编译/链接缺陷
+
+通信框架构建系统复杂度随多编译目标(host/device/kernel/daemon)和多构建模式(open/closed/HCCD/CCL_KERNEL)增长而爆炸，是hcomm-dev中频次最高的缺陷类别(24条, 14.8%)。
+
+#### 规则 BUILD-02: CMakeLists源文件遗漏/重复
+
+严重等级: P2
+
+缺陷描述: 新增.cc文件后忘记在CMakeLists.txt中添加，导致功能不被编译链接。另有源文件同时被添加到两个CMakeLists.txt中导致符号重复定义。
+
+典型代码示例:
+
+```cmake
+# 缺陷 — alltoallv continuous pipeline的两个.cc文件遗漏
+set(SOURCES
+    ...
+    coll_all_to_all_v_executor.cc
+    # 遗漏: alltoallv_continuous_pipeline.cc
+    # 遗漏: coll_all_to_all_v_continuous_pipeline_executor.cc
+    ...
+)
+
+# 修复 — 同步添加新增源文件
+set(SOURCES
+    ...
+    coll_all_to_all_v_executor.cc
+    alltoallv_continuous_pipeline.cc
+    coll_all_to_all_v_continuous_pipeline_executor.cc
+    ...
+)
+```
+
+审查检查方法:
+- 新增.cc文件的PR是否同步修改了CMakeLists.txt?
+- 同一.cc文件是否出现在多个CMakeLists.txt中（符号重复）?
+- 新增add_library时，逐个检查源文件中的#include和函数调用是否有对应.cc文件在target中
+
+关联commit: hcomm-dev `8c424d41`/`20125a56`, hccl-dev `beb0ed54`（scatter_aicpu_kernel库遗漏5个依赖源文件）
+
+---
+
+#### 规则 BUILD-03: 条件编译/编译目标不兼容
+
+严重等级: P2
+
+缺陷描述: 在特定编译目标下引入不可用的外部依赖，或条件编译块覆盖不完整。常见模式: 函数调用了ACL API但CCL_KERNEL_AICPU/HCCD目标下ACL不可用。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — ParseCannVersion()调用ACL API，HCCD目标下不可用
+HcclResult ParseCannVersion() {
+    const char *version = aclGetVersion();  // CCL_KERNEL_AICPU/HCCD下链接失败
+    ...
+}
+
+// 修复 — 条件编译包裹
+HcclResult ParseCannVersion() {
+#if !defined(CCL_KERNEL_AICPU) && !defined(HCCD)
+    const char *version = aclGetVersion();
+    ...
+#else
+    return HCCL_E_NOT_SUPPORT;
+#endif
+}
+```
+
+审查检查方法:
+- 新增外部API依赖时，是否检查了所有编译目标(host/device/kernel/daemon)的可用性?
+- 条件编译块(BUILD_OPEN_PROJECT/KERNEL_MODE等)的open和closed路径是否对称?
+- 不同编译环境(Host/AICPU)下API可用性不同，需要条件编译隔离
+
+关联commit: hcomm-dev `89fd99e0`/`947460b2`
+
+---
+
+#### 规则 BUILD-04: ABI兼容性/符号导出
+
+严重等级: P1
+
+缺陷描述: 公共头文件中使用内部类型、导出C++符号到C linkage、动态库导出函数使用std::string参数等。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 公共头文件hcomm_primitives.h中uint32_t改为内部typedef u32
+// 外部用户编译时找不到u32定义，ABI破坏
+typedef unsigned int u32;  // 内部头文件
+void HcommFunc(u32 param);  // pkg_inc/中使用内部typedef
+
+// 修复 — 公共头文件仅使用标准C/C++类型
+void HcommFunc(uint32_t param);
+```
+
+审查检查方法:
+- 公共头文件(pkg_inc/)中是否仅使用标准C/C++类型，禁止内部typedef?
+- 动态库导出函数(extern "C")的参数和返回值是否为POD类型?
+- stub符号与实际函数签名是否匹配?
+
+关联commit: hcomm-dev `30e25e50`/`7fccc101`/`e6d12932`
+
+---
+
+#### 规则 BUILD-05: CMake版本兼容性与参数格式
+
+严重等级: P2
+
+缺陷描述: CMake脚本中使用了高版本特性（如CMAKE_CURRENT_FUNCTION_LIST_DIR需要3.17+），或`-D`参数后加空格导致解析失败。
+
+典型代码示例:
+
+```cmake
+# 缺陷 — CMAKE_CURRENT_FUNCTION_LIST_DIR需要CMake 3.17+
+-P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/_pack_stage.cmake"
+
+# 修复 — 在文件作用域保存路径（兼容低版本CMake）
+set(_FUNC_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+-P "${_FUNC_CMAKE_DIR}/_pack_stage.cmake"
+
+# 缺陷 — -D后有空格导致某些版本解析失败
+set(manifest_arg "-D _MANIFEST_FILE=${staging_dir}/${ARG_MANIFEST}")
+
+# 修复 — -D后不加空格
+set(manifest_arg -D_MANIFEST_FILE=${staging_dir}/${ARG_MANIFEST})
+```
+
+审查检查方法:
+- 对照项目cmake_minimum_required确认使用的CMake特性版本要求
+- `-D`后紧跟变量名，不加空格
+- 函数内引用路径变量时，确认变量在函数作用域内可用
+
+关联commit: hccl-dev `1f13573a`
+
+---
+
+### 类别十三：初始化/赋值缺陷
+
+通信框架对象生命周期早期阶段的脆弱性。核心模式是多分支初始化路径中的遗漏和成员变量初始化缺失。hcomm-dev中17条, 占10.5%。
+
+#### 规则 INIT-01: 多分支初始化路径不对称
+
+严重等级: P1
+
+缺陷描述: 同一函数存在V1/V2、图模式/单算子模式等多条初始化分支，其中某条遗漏了必要的初始化步骤。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — V2路径创建communicator后遗漏HcomSetGroupTopoInfo
+// V2路径
+auto lambda = [&]() {
+    CHK_RET(CreateCommunicator(...));
+    // 遗漏: CHK_RET(HcomSetGroupTopoInfo(...));
+    return HCCL_SUCCESS;
+};
+HCCLV2_FUNC_RUN(lambda);
+
+// 非V2路径(已正确调用)
+CHK_RET(CreateCommunicator(...));
+CHK_RET(HcomSetGroupTopoInfo(...));
+
+// 修复 — V2路径补充与非V2对称的调用
+auto lambda = [&]() {
+    CHK_RET(CreateCommunicator(...));
+    CHK_RET(HcomSetGroupTopoInfo(...));  // 补充
+    return HCCL_SUCCESS;
+};
+```
+
+审查检查方法:
+- 同一函数的多条初始化分支是否执行了相同的必要初始化步骤（对称性检查）?
+- V2适配路径是否完整覆盖了V1路径的所有初始化步骤?
+- 对比两个分支的函数调用序列，寻找不对称项
+
+关联commit: hcomm-dev `65f0c2ba`/`b54e3852`
+
+---
+
+#### 规则 INIT-02: 成员变量未初始化/默认值错误
+
+严重等级: P0
+
+缺陷描述: C++内置类型成员未显式初始化，运行时包含垃圾值导致非确定性行为。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 多个成员缺少类内初始化器
+class HcclCommunicator {
+    bool isGroupMode_;       // 垃圾值 -> group模式判断异常
+    u32 iSend;               // 垃圾值
+    u32 iRecv;
+    u32 nSend;
+    u32 nRecv;
+    u32 bufferSliceNum;
+};
+
+// 修复 — 显式初始化
+class HcclCommunicator {
+    bool isGroupMode_ = false;
+    u32 iSend = 0;
+    u32 iRecv = 0;
+    u32 nSend = 0;
+    u32 nRecv = 0;
+    u32 bufferSliceNum = 0;
+};
+```
+
+审查检查方法:
+- C++类的内置类型成员(bool/int/u32/指针)是否有显式初始化(in-class initializer或构造函数初始化列表)?
+- Init函数是否具备幂等性? 重复调用是否会覆盖外部配置?
+
+关联commit: hcomm-dev `2bad014b`/`103755111cff`/`6596fc1f`
+
+---
+
+#### 规则 INIT-03: offload/lambda变量作用域泄漏
+
+严重等级: P1
+
+缺陷描述: HCCLV2_FUNC_RUN宏的lambda外部提前做了cast和使用，offload模式下控制流未正确进入V2分支，变量在错误作用域被访问。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — lambda外部使用了应在V2分支内的变量
+auto *comm = static_cast<hcclComm*>(handle);  // lambda外部cast
+comm->DoSomething();                            // 非V2模式下不应执行
+auto lambda = [&]() {
+    HCCLV2_FUNC_RUN(comm->V2Method());
+    return HCCL_SUCCESS;
+};
+
+// 修复 — cast和使用都移入lambda内部
+auto lambda = [&]() {
+    auto *comm = static_cast<hcclComm*>(handle);
+    CHK_RET(comm->V2Method());
+    return HCCL_SUCCESS;
+};
+HCCLV2_FUNC_RUN(lambda);
+```
+
+审查检查方法:
+- HCCLV2_FUNC_RUN宏前后的变量使用是否明确在正确的作用域内?
+- lambda捕获列表中的变量是否可能在外部被提前消费?
+
+关联commit: hcomm-dev `b54e3852`
+
+---
+
+### 类别十四：数据类型/枚举缺陷
+
+通信框架中类型安全问题突出，包括枚举值误用为算术因子、枚举变体混淆、map::at()异常、参数对象混淆等。
+
+#### 规则 TYPE-01: 枚举值语义误用
+
+严重等级: P0
+
+缺陷描述: 将枚举值当作字节大小、数组索引等用于算术运算。枚举值代表类型标识而非数值量。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — dataType枚举值被直接用作除数
+// reduceInfo.dataType是枚举值(如HCCL_DATA_TYPE_FP32=3)，不是字节数(4)
+u64 count = src->len / reduceInfo.dataType;  // 用枚举值做除法，结果错误
+
+// 修复 — 通过SIZE_TABLE查表获取字节数
+u64 count = src->len / SIZE_TABLE[reduceInfo.dataType];  // 查表获取实际字节数
+```
+
+审查检查方法:
+- dataType枚举值是否被直接用作算术运算的操作数? 应通过SIZE_TABLE查表获取字节数
+- 枚举常量比较时，常量名是否与期望语义一致?
+
+关联commit: hcomm-dev `5422c95d`/`20824546`
+
+---
+
+#### 规则 TYPE-02: 通信引擎枚举变体混淆
+
+严重等级: P0
+
+缺陷描述: CANN平台存在多个语义相近的通信引擎枚举值（COMM_ENGINE_AICPU / COMM_ENGINE_AICPU_TS / COMM_ENGINE_CPU等），使用了错误的变体会导致执行路径、资源分配和launch模式全部错误。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 使用AICPU而非AICPU_TS（6处全部用错）
+param.engine = CommEngine::COMM_ENGINE_AICPU;
+
+// 修复 — 使用正确的AICPU_TS变体
+param.engine = CommEngine::COMM_ENGINE_AICPU_TS;
+```
+
+审查检查方法:
+- 搜索所有CommEngine枚举使用点，确认变体选择与设计文档一致
+- 同一文件/函数内的引擎类型应前后一致
+- 新增引擎类型使用时，要求开发者说明选择理由
+
+关联commit: hccl-dev `7347fee3`
+
+---
+
+#### 规则 TYPE-03: 平台字符串字面量拼写错误
+
+严重等级: P1
+
+缺陷描述: 平台对launch mode等字符串做精确匹配，拼写不一致（如"AICPU" vs "AI_CPU"）会导致功能静默失效。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 平台期望的是"AI_CPU"（带下划线）
+launchMode = "AICPU";
+
+// 修复
+launchMode = "AI_CPU";
+```
+
+审查检查方法:
+- 所有平台相关字符串字面量应有对应常量定义，禁止裸字符串
+- 审查时将字符串字面量与平台文档/头文件中的定义逐字符比对
+- 搜索相似但不同的字符串（如"AICPU"/"AI_CPU"/"AiCpu"）是否混用
+
+关联commit: hccl-dev `13b6032d`
+
+---
+
+#### 规则 TYPE-04: 参数对象混淆/引用错误
+
+严重等级: P0
+
+缺陷描述: 传入的参数使用了错误的对象，或参数被声明但未使用。多个同类型参数的函数容易传参错误。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 应从dstThreadPtr获取notify，实际从threadPtr(源线程)获取
+void HcommThreadNotifyRecordOnThread(Thread *threadPtr, Thread *dstThreadPtr) {
+    auto notify = threadPtr->GetNotify();    // 错误: 从源线程获取
+    // 参数dstThreadPtr传入却未使用
+    ...
+}
+
+// 修复 — 使用正确的参数
+void HcommThreadNotifyRecordOnThread(Thread *threadPtr, Thread *dstThreadPtr) {
+    auto notify = dstThreadPtr->GetNotify();  // 从目标线程获取
+    ...
+}
+```
+
+审查检查方法:
+- 函数参数被声明但未使用时是否告警（unused parameter）?
+- 多个同类型参数的函数，调用处传参顺序是否正确?
+
+关联commit: hcomm-dev `d89396c9`
+
+---
+
+#### 规则 TYPE-05: map::at()对未收录key抛异常
+
+严重等级: P0
+
+缺陷描述: std::map::at()在key不存在时抛std::out_of_range异常，C++异常未被捕获导致coredump。新增枚举值后未更新对应map。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — errorMap未收录新增错误码，at()抛异常
+std::string msg = errorMap.at(code);  // HCCL_E_SUSPENDING等未收录 -> 异常 -> coredump
+
+// 修复 — 改用find()+迭代器检查
+auto it = errorMap.find(code);
+if (it != errorMap.end()) {
+    std::string msg = it->second;
+} else {
+    std::string msg = "unknown error code: " + std::to_string(code);
+}
+```
+
+审查检查方法:
+- 禁止在可能接收不可控输入的场景使用std::map::at()，应使用find()+迭代器检查
+- 新增枚举值时，是否全量搜索所有使用该枚举的map/switch/数组并同步更新?
+
+关联commit: hcomm-dev `a84b98a0`
+
+---
+
+### 类别十五：代码质量/命名/拼写
+
+命名不一致和拼写错误在通信框架的算法名称匹配场景中可能造成严重功能故障。hcomm-dev中15条, 占9.3%。
+
+#### 规则 QUAL-01: 算法名称/变量名拼写错误
+
+严重等级: P1
+
+缺陷描述: Copy-Paste导致的算法名称错误、变量名多/少字符。通信框架通过字符串匹配选择executor，拼写错误直接导致选错算法。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — ReduceScatterV的算法名写成ReduceScatter(缺少"V"后缀)
+algName = "AlignedReduceScatterDoubleRingFor91093Executor";
+
+// 修复 — 补全"V"后缀
+algName = "AlignedReduceScatterVDoubleRingFor91093Executor";
+```
+
+审查检查方法:
+- ReduceScatterV相关文件中的算法名称是否包含"V"后缀?
+- Copy-Paste新函数后，函数名/算法名/变量名中的标识符是否全部替换?
+- 算法名称字符串是否有拼写检查机制（建议引入cspell）
+
+关联commit: hcomm-dev `5bfaa1e5`/`1820333425906`, hccl-dev `8222fcf8`/`11b7211a`（复制粘贴后变量名未替换）
+
+---
+
+#### 规则 QUAL-02: 全代码库拼写错误渗入API
+
+严重等级: P3
+
+缺陷描述: 常见拼写错误(invaild/vaild, recevie, at lest等)渗入枚举值、函数名、日志，部分影响API兼容性。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 枚举值拼写错误
+enum OpType {
+    OP_SEND = 0,
+    OP_RECV,
+    OP_INVAILD    // invalid拼成invaild
+};
+
+// 修复
+enum OpType {
+    OP_SEND = 0,
+    OP_RECV,
+    OP_INVALID
+};
+```
+
+审查检查方法:
+- CI中引入cspell或codespell工具扫描代码注释和字符串字面量
+- 枚举值/函数名中的单词是否拼写正确?
+
+关联commit: hcomm-dev `345be6c4`/`02d62eef`
+
+---
+
+#### 规则 QUAL-03: 结构体/类字段变更未同步到所有使用方
+
+严重等级: P1
+
+缺陷描述: 修改结构体定义（增删字段）后，部分使用方（特别是测试代码、mock、stub）未同步更新，导致编译失败。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — HcclCommConfig中commEngine/threadNum/notifyNumPerThread已被移除
+// 但测试代码仍在设置这些字段
+commConfig.commEngine = HCCL_COMM_ENGINE_CONFIG_NOT_SET;
+commConfig.threadNum  = HCCL_COMM_THREADNUM_CONFIG_NOT_SET;
+```
+
+审查检查方法:
+- 修改struct/class定义时，全局grep所有使用点，范围必须包含test/目录
+- 提交变更前在本地完成全量编译
+- 注意同一struct可能在.cc和.h中都有使用
+
+关联commit: hccl-dev `c11a5289`/`8222fcf8`
+
+---
+
+#### 规则 QUAL-04: 公共API函数名与头文件声明不匹配
+
+严重等级: P1
+
+缺陷描述: 公共API的.cc实现使用了错误的函数名（与内部函数同名），与.h声明不一致，导致链接失败或无限递归。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 头文件声明的是HcclBatchSendRecv，但实现写成了HcclBatchSendRecvInner
+HcclResult HcclBatchSendRecvInner(HcclSendRecvItem* sendRecvInfo, ...) {
+    return HcclBatchSendRecvInner(sendRecvInfo, itemNum, comm, stream);
+    // 这还会导致无限递归（自己调自己）
+}
+
+// 修复
+HcclResult HcclBatchSendRecv(HcclSendRecvItem* sendRecvInfo, ...) {
+    return HcclBatchSendRecvInner(sendRecvInfo, itemNum, comm, stream);
+}
+```
+
+审查检查方法:
+- 公共API函数的.cc定义必须与.h声明的函数签名精确匹配
+- 包装函数的名字不应与被包装函数相同（否则变成递归调用）
+
+关联commit: hccl-dev `cae52923`
+
+---
+
+### 类别十六：空指针/入参校验缺陷
+
+集中在framework层的公共API入口和内部组件的指针使用。hcomm-dev中8条, 占4.9%。
+
+#### 规则 PTR-01: 空指针检查顺序错误
+
+严重等级: P0
+
+缺陷描述: 先解引用再检查null，或日志中%s传可能为nullptr的指针（UB）。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 先解引用再检查null
+auto val = ptr->GetValue();
+if (ptr == nullptr) {
+    return HCCL_E_PTR;
+}
+
+// 修复 — 检查前置于解引用
+if (ptr == nullptr) {
+    return HCCL_E_PTR;
+}
+auto val = ptr->GetValue();
+```
+
+```cpp
+// 缺陷 — nullptr传给%s是UB
+void DestroyDispatcherCtx(const char *commId) {
+    HCCL_INFO("[DestroyCtx] commId[%s]", commId);  // commId可能为nullptr
+    if (commId == nullptr) { return; }
+
+// 修复 — 空指针检查前置
+void DestroyDispatcherCtx(const char *commId) {
+    if (commId == nullptr) { return; }
+    HCCL_INFO("[DestroyCtx] commId[%s]", commId);
+```
+
+审查检查方法:
+- 空指针检查是否在解引用之前（不是之后）?
+- %s格式化的参数是否保证非空?
+
+关联commit: hcomm-dev `dd744786`/`384d78c0`
+
+---
+
+#### 规则 PTR-02: API入口参数校验缺失
+
+严重等级: P1
+
+缺陷描述: 公共API中reinterpret_cast后未检查null，用户传入无效句柄则crash。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — HcclGetHcclBuffer检查了buffer但漏检comm
+HcclResult HcclGetHcclBuffer(HcclComm comm, void **buffer) {
+    CHK_PRT_RET(buffer == nullptr,
+        HCCL_ERROR("buffer is nullptr"), HCCL_E_PTR);
+    hccl::hcclComm *hcclComm = static_cast<hccl::hcclComm *>(comm);
+    // comm为nullptr时hcclComm也是nullptr -> 下一行crash
+    std::string identifier = hcclComm->GetIdentifier();
+
+// 修复 — 补充comm指针校验
+HcclResult HcclGetHcclBuffer(HcclComm comm, void **buffer) {
+    CHK_PRT_RET(buffer == nullptr,
+        HCCL_ERROR("buffer is nullptr"), HCCL_E_PTR);
+    CHK_PRT_RET(comm == nullptr,
+        HCCL_ERROR("comm is nullptr"), HCCL_E_PTR);
+```
+
+审查检查方法:
+- reinterpret_cast/static_cast后是否检查null? 特别是来自用户输入的句柄
+- 公共API入口是否对所有指针参数做了null/有效性校验?
+
+关联commit: hcomm-dev `58d588bf`
+
+---
+
+### 类别十七：接口/API设计与适配缺陷
+
+通信框架经历V1->V2迁移、ACL->RT接口替换、open/closed双模式等架构演进，接口适配层面的设计缺陷频繁暴露。hcomm-dev中8条, 占4.9%。
+
+#### 规则 API-01: 抢跑依赖未发布API
+
+严重等级: P2
+
+缺陷描述: 在依赖的SDK正式发布新接口前就在消费端使用，链接失败。12天内对同一组文件进行5次方向性变更（乒乓Revert）。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — rtModelGetId在runtime SDK中尚未发布
+uint64_t modelId;
+rtModelGetId(rtModel, &modelId);  // 链接失败: undefined symbol
+
+// 修复 — dlopen双路径fallback
+void *handle = dlopen("libruntime.so", RTLD_LAZY);
+auto func = dlsym(handle, "rtModelGetId");
+if (func) {
+    func(rtModel, &modelId);
+} else {
+    modelId = reinterpret_cast<uint64_t>(rtModel);  // fallback
+}
+```
+
+审查检查方法:
+- 跨团队接口迁移是否前置确认目标API在所有受支持版本已发布?
+- 是否有dlopen/weak symbol的兼容性降级方案?
+
+关联commit: hcomm-dev `30e25e50`/`1d8e2c14`
+
+---
+
+#### 规则 API-02: 返回值语义差异未适配
+
+严重等级: P1
+
+缺陷描述: 底层接口替换后返回值语义变化（bitmask vs enum），调用方解析逻辑未同步适配。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — ACL返回bitmask，RT返回enum，切换后解析逻辑未改
+u32 linkType = rtGetPairPhyDevicesInfo(devA, devB);
+if (linkType & LINK_TYPE_HCCS) {  // 按bitmask解析enum -> 逻辑错误
+    ...
+}
+
+// 修复 — 适配enum语义
+u32 linkType = rtGetPairPhyDevicesInfo(devA, devB);
+if (linkType == LINK_TYPE_HCCS) {  // 按enum单值比较
+    ...
+}
+```
+
+审查检查方法:
+- 返回值类型差异（bitmask vs enum, signed vs unsigned）在迁移时调用方解析逻辑是否同步适配?
+- API返回裸指针时，所有权（谁分配谁释放）是否在注释中明确文档化?
+
+关联commit: hcomm-dev `1d8e2c14`
+
+---
+
+#### 规则 API-03: 封装层能力不完整
+
+严重等级: P2
+
+缺陷描述: 适配层未覆盖底层完整能力，或V2 weak symbol函数声明与实际签名不匹配。
+
+审查检查方法:
+- 封装层新增接口后，是否覆盖了底层完整能力?
+- V2 weak symbol函数的签名是否与实际函数完全一致?
+
+关联commit: hcomm-dev `47020bd5`/`26f5813f`
+
+---
+
+### 类别十八：硬件/平台适配缺陷
+
+通信库需要适配多种芯片(910B/910_93/910_95/A5等)和多种连接协议(PCIE/RoCE/HCCS/URMA)，硬件协议约束和设备差异性是低可审查性缺陷的主要来源。hcomm-dev中6条, 占3.7%。
+
+#### 规则 HW-01: 硬件协议乘数因子遗漏
+
+严重等级: P0
+
+缺陷描述: URMA约束每个SQE含4个WQEBB，多处代码计算SQ buffer大小和VA映射长度时遗漏WQEBB_NUM_PER_SQE(=4)乘数因子，device侧VA空间只有实际需要的1/4，内存越界。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — sqDepth未乘WQEBB_NUM_PER_SQE
+UbConnLite::UbConnLite(..., u32 sqDepth, ...) {
+    sqDepth_ = sqDepth;  // 遗漏乘数因子
+}
+u64 sqBufferSize = sqDepth_ * WQE_BB_SIZE;  // 缺 * WQEBB_NUM_PER_SQE
+// VA空间只有实际需要的1/4 -> 内存越界
+
+// 修复 — 统一乘WQEBB_NUM_PER_SQE
+UbConnLite::UbConnLite(..., u32 sqDepth, ...) {
+    sqDepth_ = sqDepth * WQEBB_NUM_PER_SQE;  // 每个SQE含4个WQEBB
+}
+```
+
+审查检查方法:
+- 涉及硬件协议约束的乘数因子是否在协议层统一封装为宏/函数? 避免多处手动乘算
+- SQ深度等协议参数的"单位"（SQE数/WQEBB数/字节）是否在类型或命名中体现?
+
+关联commit: hcomm-dev `df96667c`
+
+---
+
+#### 规则 HW-02: 设备类型特殊路径未处理
+
+严重等级: P1
+
+缺陷描述: 新增设备类型的初始化/资源管理路径与已有设备不同。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 910_95设备notify初始化不需要SetIpc()
+CHK_RET(notify->SetIpc());  // 910_95上SetIpc()失败 -> notify申请失败
+
+// 修复 — 按设备类型分支处理
+if (deviceType_ != DEV_TYPE_910_95) {
+    CHK_RET(notify->SetIpc());
+}
+```
+
+审查检查方法:
+- 新增设备类型时，是否审查了所有资源初始化路径的分支处理?
+- 是否有设备兼容性矩阵文档?
+
+关联commit: hcomm-dev `b9f46705`/`a0e420e9`
+
+---
+
+#### 规则 HW-03: 硬件寄存器/地址映射宏定义冲突
+
+严重等级: P0
+
+缺陷描述: 宏常量值重复导致寄存器访问错误。读DB_STATUS实际读到PI_TYPE寄存器。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 宏定义值与另一个宏重复
+#define URMA_JFS_PI_TYPE     0x0011
+#define URMA_JFS_DB_STATUS   0x0011  // 错误: 与PI_TYPE重复
+
+// 修复
+#define URMA_JFS_DB_STATUS   0x000f  // 正确值
+```
+
+审查检查方法:
+- 同一组寄存器偏移宏是否通过static_assert确保无重复值?
+- 新增寄存器映射宏时是否检查了已有定义?
+
+关联commit: hcomm-dev `39ad6c07`
+
+---
+
+### 类别十九：状态/超时管理缺陷
+
+通信框架中大量使用重试超时、环境变量配置等机制。超时值不一致和状态不刷新是常见根因。hcomm-dev中10条, 占6.2%。
+
+#### 规则 STATE-01: 超时值硬编码/配置不一致
+
+严重等级: P1
+
+缺陷描述: 多层超时值未统一联动，内外层超时语义不一致。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — OpRetry超时硬编码205秒，用户配置更大值时先超时误判
+constexpr u32 OP_RETRY_SEND_RECV_TIMEOUT = 205;
+future.wait_for(std::chrono::seconds(OP_RETRY_SEND_RECV_TIMEOUT));
+// 用户HCCL_LINK_TIMEOUT=300时，OpRetry在205秒先超时
+
+// 修复 — 取max(用户配置, 默认值) + 裕量
+u32 timeout = std::max(GetExternalInputHcclLinkTimeOut(),
+                       OP_RETRY_SEND_RECV_TIMEOUT) + OP_RETRY_WAIT_AICPU_TIMEOUT;
+```
+
+```cpp
+// 缺陷 — execTimeOut=0语义为"不超时"，代码按字面值处理
+u64 timeoutUs = execTimeOut * 1000000;  // 0 * 1000000 = 0微秒 -> 立即超时
+
+// 修复 — 显式处理零值特殊语义
+u64 timeoutUs = (execTimeOut == 0) ? UINT64_MAX : execTimeOut * 1000000;
+```
+
+审查检查方法:
+- 超时参数是否从外层逐层传递到底层阻塞调用?
+- 超时值0是否有"不限制"的特殊语义? 转换函数中是否显式处理了零值?
+- 不同组件的超时值是否与用户可配置值联动（取max而非硬编码）?
+
+关联commit: hcomm-dev `b8de68b9`/`1479e7ba`/`f058f2d9`
+
+---
+
+#### 规则 STATE-02: 环境变量/运行时状态一致性
+
+严重等级: P2
+
+缺陷描述: 每次调用都getenv而非缓存初始化时读取，运行时修改环境变量导致行为不一致。
+
+典型代码示例:
+
+```cpp
+// 缺陷 — 每次调用都读环境变量，运行时修改导致行为不一致
+bool IsIndependentOp() {
+    const char *env = getenv("HCCL_INDEPENDENT_OP");
+    return (env != nullptr && strcmp(env, "1") == 0);
+}
+
+// 修复 — 初始化时一次性读取并缓存
+static bool g_isIndependentOp = false;
+void InitConfig() {
+    const char *env = getenv("HCCL_INDEPENDENT_OP");
+    g_isIndependentOp = (env != nullptr && strcmp(env, "1") == 0);
+}
+bool IsIndependentOp() { return g_isIndependentOp; }
+```
+
+审查检查方法:
+- 环境变量是否在初始化时一次性读取缓存? 运行时重复读取是否有意为之?
+
+关联commit: hcomm-dev `578c16b4`
+
+---
+
+### 类别二十：条件判断逻辑缺陷
+
+#### 规则 COND-01: 条件方向错误/条件编译覆盖运行时分支
+
+严重等级: P0
+
+缺陷描述: 条件判断写反，或#ifdef块无条件覆写了上方的运行时分支判断。
+
+典型代码示例:
+
+```c
+// 缺陷 — #ifdef CONFIG_CONTEXT块无条件覆写运行时分支
+phyId = (attr->protocol == PROTOCOL_RDMA) ?
+        attr->dev.rdma.phyId : attr->ub.phy_id;
+
+#ifdef CONFIG_CONTEXT
+    phyId = attr->ub.phy_id;  // 无条件覆写，RDMA时使用了错误的phyId
+#endif
+
+// 修复 — 条件编译块内保持与上方一致的分支语义
+#ifdef CONFIG_CONTEXT
+    phyId = (attr->protocol == PROTOCOL_RDMA) ?
+            attr->dev.rdma.phyId : attr->ub.phy_id;
+#endif
+```
+
+审查检查方法:
+- 条件表达式的方向(>= vs <=, && vs ||)是否与注释/上下文语义一致?
+- #ifdef块是否无条件覆写了上方的运行时判断?
+- 基类和子类存在相同语义条件判断时，是否通过virtual方法统一?
+
+关联commit: hcomm-dev `54e5e41b`/`32ff3df8`/`66f33b83`
+
+---
+
+### 类别二十一：网络安全
+
+通信库中涉及敏感信息保护的审查规则，违反即触碰华为产品网络安全红线。
+
+#### 规则 SEC-01: token认证信息禁止打印到日志
+
+严重等级: P0
+
+缺陷描述: token认证类信息（tokenId、tokenValue）属于华为公司产品网络安全红线中规定的敏感信息，禁止通过日志、调试输出等任何途径打印。在UB芯片上需重点关注tokenId和tokenValue两个字段。
+
+典型代码示例:
+
+```cpp
+// 缺陷代码
+HCCL_INFO("token info: id=%u, value=%s", tokenId, tokenValue);  // 红线违规：敏感信息入日志
+
+// 修复代码
+HCCL_INFO("token info: id=***, value=***");  // 脱敏处理
+```
+
+审查检查方法:
+- grep所有日志输出点(HCCL_INFO/DEBUG/ERROR/WARNING/RUN_INFO)，检查是否包含tokenId或tokenValue
+- 新增日志语句时逐条确认无敏感字段泄露
+- UB芯片相关代码重点检查token相关字段
+
+---
+
+#### 规则 SEC-02: RDMA rkey/lkey不属于敏感信息
+
+严重等级: 信息（误报抑制）
+
+缺陷描述: RDMA协议中使用的rkey和lkey信息不用于鉴权功能，仅作为索引辅助硬件找到注册的内存，因此不属于敏感信息。审查时不应将rkey/lkey的日志打印标记为网络安全违规。
+
+审查检查方法:
+- 遇到rkey/lkey打印时不报"敏感信息泄露"
+- 参见 references/false-positives.md 中的对应条目
+
 ---
 
 ### 附录：规则速查表
@@ -1262,13 +2317,17 @@ CcuKernel::~CcuKernel() {}  // 显式定义在单一TU，确保符号导出
 | CON-05 | atomic变量须用.load()读取 | P1 | 并发问题 |
 | CON-06 | 单例Init区分once/every-time | P1 | 并发问题 |
 | CON-07 | thread_local变量须在线程入口点设置 | P1 | 并发问题 |
+| CON-08 | 全局/静态变量无锁访问 | P0 | 并发问题 |
+| CON-09 | TOCTOU竞态 | P1 | 并发问题 |
 | LOG-01 | 格式化字符串类型匹配 | P2 | 日志与调试 |
 | LOG-02 | 日志tag须匹配类名/函数名 | P3 | 日志与调试 |
 | LOG-03 | 快速路径功能对等 | P2 | 日志与调试 |
+| LOG-04 | 日志洪泛/变量引用错误 | P3 | 日志与调试 |
 | RES-01 | early return跳过初始化/清理 | P1 | 资源生命周期 |
 | RES-02 | map/cache key唯一标识资源 | P1 | 资源生命周期 |
 | RES-03 | context切换附近内存操作审查 | P1 | 资源生命周期 |
 | RES-04 | 析构路径完整性 | P1 | 资源生命周期 |
+| RES-05 | 资源释放顺序错误/释放后未置空 | P0 | 资源生命周期 |
 | ERR-01 | 异常上报须受前置条件保护 | P2 | 错误处理 |
 | ERR-02 | 不允许裸try-catch吞异常 | P2 | 错误处理 |
 | ERR-03 | 对外接口不应抛C++异常 | P0 | 错误处理 |
@@ -1291,12 +2350,42 @@ CcuKernel::~CcuKernel() {}  // 显式定义在单一TU，确保符号导出
 | SYS-04 | 返回值系统性忽略 | P1 | 系统性风险 |
 | SYS-05 | CI编译器警告强制开启 | P2 | 系统性风险 |
 | SYS-06 | 热点文件已知高危风险 | P1 | 系统性风险 |
+| SYS-07 | 公共API/ABI设计债务 | P1 | 系统性风险 |
+| BUILD-02 | CMakeLists源文件遗漏/重复 | P2 | 构建/编译/链接 |
+| BUILD-03 | 条件编译/编译目标不兼容 | P2 | 构建/编译/链接 |
+| BUILD-04 | ABI兼容性/符号导出 | P1 | 构建/编译/链接 |
+| BUILD-05 | CMake版本兼容性与参数格式 | P2 | 构建/编译/链接 |
+| INIT-01 | 多分支初始化路径不对称 | P1 | 初始化/赋值 |
+| INIT-02 | 成员变量未初始化/默认值错误 | P0 | 初始化/赋值 |
+| INIT-03 | offload/lambda变量作用域泄漏 | P1 | 初始化/赋值 |
+| TYPE-01 | 枚举值语义误用 | P0 | 数据类型/枚举 |
+| TYPE-02 | 通信引擎枚举变体混淆 | P0 | 数据类型/枚举 |
+| TYPE-03 | 平台字符串字面量拼写错误 | P1 | 数据类型/枚举 |
+| TYPE-04 | 参数对象混淆/引用错误 | P0 | 数据类型/枚举 |
+| TYPE-05 | map::at()对未收录key抛异常 | P0 | 数据类型/枚举 |
+| QUAL-01 | 算法名称/变量名拼写错误 | P1 | 代码质量/命名 |
+| QUAL-02 | 全代码库拼写错误渗入API | P3 | 代码质量/命名 |
+| QUAL-03 | 结构体/类字段变更未同步 | P1 | 代码质量/命名 |
+| QUAL-04 | 公共API函数名与头文件不匹配 | P1 | 代码质量/命名 |
+| PTR-01 | 空指针检查顺序错误 | P0 | 空指针/入参校验 |
+| PTR-02 | API入口参数校验缺失 | P1 | 空指针/入参校验 |
+| API-01 | 抢跑依赖未发布API | P2 | 接口/API设计 |
+| API-02 | 返回值语义差异未适配 | P1 | 接口/API设计 |
+| API-03 | 封装层能力不完整 | P2 | 接口/API设计 |
+| HW-01 | 硬件协议乘数因子遗漏 | P0 | 硬件/平台适配 |
+| HW-02 | 设备类型特殊路径未处理 | P1 | 硬件/平台适配 |
+| HW-03 | 硬件寄存器/地址映射宏冲突 | P0 | 硬件/平台适配 |
+| STATE-01 | 超时值硬编码/配置不一致 | P1 | 状态/超时管理 |
+| STATE-02 | 环境变量/运行时状态一致性 | P2 | 状态/超时管理 |
+| COND-01 | 条件方向错误/条件编译覆盖运行时分支 | P0 | 条件判断逻辑 |
+| SEC-01 | token认证信息禁止打印到日志 | P0 | 网络安全 |
+| SEC-02 | RDMA rkey/lkey不属于敏感信息（误报抑制） | 信息 | 网络安全 |
 
 ---
 
 ### 数据来源
 
-- 仓库: /Users/shanshan/repo/cann/hcomm
-- 分析范围: 428次提交，84次缺陷相关提交（19.6%）
+- 仓库: hcomm (428次提交, 84次缺陷), hcomm-dev (488次提交, 162次缺陷), hccl-dev (133次提交, 10次缺陷)
+- 分析范围: 共1049次提交，256次缺陷相关提交
 - 分析方法: 逐条git show分析缺陷提交diff + 热点文件结构性审查 + Revert专项分析
-- 缺陷类别分布: 算法正确性(25%) > 配置与兼容性(15.5%) > 并发问题(11.9%) > 日志与调试(9.5%) = 资源生命周期(9.5%) > 错误处理(8.3%) > 缓存一致性(7.1%) > 内存管理(4.8%) > 整数溢出(2.4%) > 构建系统(2.4%) > C++语言特性(1.2%)
+- 原48条规则来自hcomm仓库; 新增31条规则来自hcomm-dev(通信框架开发仓)和hccl-dev(开源开发仓)的增量缺陷模式; 10条已有规则通过dev仓数据补充了额外evidence

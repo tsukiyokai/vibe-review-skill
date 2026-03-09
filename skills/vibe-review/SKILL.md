@@ -40,8 +40,24 @@ $ARGUMENTS
 |------|----------|
 | hccl, hcomm | standards-productline-cann-cpp.md + standards-project-hccl.md |
 | ops-transformer | standards-productline-cann-cpp.md + standards-project-ops-transformer.md |
+| ops-nn | standards-productline-cann-cpp.md + standards-project-ops-nn.md |
 | CANN其他仓 | standards-productline-cann-cpp.md |
 | 非CANN | （无额外标准） |
+
+### 领域知识
+
+审查hccl/hcomm仓库时，若`~/repo/cann/docs/hccl/`目录存在，可按需查阅其中的文档辅助理解业务语义：
+
+| 文件 | 内容 |
+|------|------|
+| user-guide.md | HCCL使用指南，理解集合通信整体流程 |
+| api-c.md / api-cpp.md / api-python.md | HCCL对外API规格，校验接口用法是否符合契约 |
+| ascendc-hccl.md | AscendC集成HCCL的方式，理解算子与通信的交互 |
+| env-vars.md | 环境变量定义，校验环境变量使用是否正确 |
+| faq.md | 常见问题，识别已知陷阱 |
+| migration.md | 版本迁移指南，理解API演进和废弃路径 |
+
+使用方式：当审查中遇到不确定的API语义、通信流程、环境变量用途时，用Grep搜索相关关键词。不要主动全量加载这些文件。
 
 ### 按需查阅
 
