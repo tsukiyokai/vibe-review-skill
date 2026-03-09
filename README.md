@@ -174,7 +174,3 @@ npx skills rm --global vibe-review             # 卸载
 | `false-positives.md`    | 需要抑制的误报模式  |
 
 如需支持新项目，创建 `standards-project-<name>.md` 并更新 `SKILL.md` 中的路由表。
-
-## License
-
-MIT
