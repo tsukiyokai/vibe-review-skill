@@ -13,7 +13,7 @@ npx @tsukiyokai/vibe-review --global
 或通过 [skills.sh](https://skills.sh/) 安装：
 
 ```bash
-npx skills add tsukiyokai/vibe-review-skill
+npx skills add cann-ai-code-reviewer/vibe-review-skill
 ```
 
 安装后在Claude Code中即可使用：
@@ -158,7 +158,7 @@ npx @tsukiyokai/vibe-review --remove --global    # 全局卸载
 npx @tsukiyokai/vibe-review --remove             # 项目级卸载
 
 # 方式二：skills.sh
-npx skills add tsukiyokai/vibe-review-skill      # 安装
+npx skills add cann-ai-code-reviewer/vibe-review-skill      # 安装
 npx skills rm --global vibe-review               # 卸载
 ```
 
