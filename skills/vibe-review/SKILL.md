@@ -2,7 +2,7 @@
 name: vibe-review
 description: "在涉及代码审查的任何场景下使用此skill。包括：审查单个文件、审查PR/MR的变更、检查编码规范合规性、查找安全漏洞或内存问题。当用户提到'code review'、'CR'、'review'、'代码审查'、'代码检视'、'编码规范检查'、'规范'，或要求检查代码质量时触发。支持C++和Python代码审查。"
 argument-hint: "[file|PR-URL|git-range]"
-allowed-tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Bash(git show*), Bash(git remote*), Bash(wc *)
+allowed-tools: Read, Grep, Glob, Bash(git diff*), Bash(git log*), Bash(git show*), Bash(git remote*), Bash(git clone*), Bash(git fetch*), Bash(git checkout*), Bash(git merge-base*), Bash(git rev-parse*), Bash(git branch*), Bash(gh api *), Bash(wc *), Bash(rm -rf /tmp/vibe-review-*), Bash(ls /tmp/vibe-review-*), Bash(mkdir -p /tmp/vibe-review-*)
 ---
 
 # 代码审查Skill
@@ -14,7 +14,7 @@ $ARGUMENTS
 参数解析：
 - 文件路径（如`src/foo.cpp`）→ 单文件审查
 - git range（如`HEAD~3..HEAD`）→ `git diff <range>`获取变更
-- PR/MR URL → 通过平台工具获取diff
+- PR/MR URL → 使用 Read 工具读取 `skills/vibe-review/pr-review.md`，按其中的流程执行
 - 无参数 → 询问用户要审查什么
 
 ## 当前环境
@@ -72,9 +72,9 @@ $ARGUMENTS
 
 此步骤是AI审查的核心优势——充分利用对整个代码库的访问能力。
 
-PR/MR审查：
+PR/MR审查（通过 `pr-review.md` 流程已获得 diff 和仓库工作目录）：
 1. 通读所有diff，理解MR整体意图（新特性？bug修复？重构？）
-2. 对每个变更的函数/类，主动读取：调用者（grep函数名）、所属类头文件、基类/派生类、同模块文件
+2. 对每个变更的函数/类，主动在仓库目录中读取：调用者（grep函数名）、所属类头文件、基类/派生类、同模块文件
 3. 识别遗漏：基于MR意图，检查是否有应改而未改的地方
 
 单文件审查：读取完整文件+关键依赖文件+grep可疑函数的其他用法。
