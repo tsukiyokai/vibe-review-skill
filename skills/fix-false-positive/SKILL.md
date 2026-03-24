@@ -125,10 +125,12 @@ git checkout -b $BRANCH_NAME
 5. **FAIL 且未到第 3 轮：** 分析本轮失败原因，调整修改方案，重新执行修改后进入下一轮。**本轮不提交。**
 
 6. **FAIL 且已是第 3 轮：**
-   - 回滚所有未提交修改：
+   - 回滚本 issue 的所有修改（仅回滚本轮实际修改的文件）：
      ```bash
      git checkout -- skills/vibe-review/references/false-positives.md \
                      skills/vibe-review/references/standards-project-ops-transformer.md \
+                     skills/vibe-review/references/standards-project-ops-nn.md \
+                     skills/vibe-review/references/standards-project-hccl.md \
                      skills/vibe-review/SKILL.md 2>/dev/null || true
      ```
      （`2>/dev/null || true` 处理文件未被修改的情况）
@@ -162,7 +164,11 @@ git checkout -b $BRANCH_NAME
 ❌ 失败：#N3（已回滚，已在 issue 上留言）
 ```
 
-- 若**所有 issue 均失败**：打印摘要后退出，不创建 PR。
+- 若**所有 issue 均失败**：打印摘要后退出，不创建 PR。同时清理临时工作分支：
+  ```bash
+  git checkout main
+  git branch -d $BRANCH_NAME
+  ```
 - 若**至少有一条通过**：继续执行 Step 4。
 
 ---
