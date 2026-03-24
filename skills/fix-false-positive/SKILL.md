@@ -35,6 +35,14 @@ gh api repos/{OWNER}/{REPO}/issues --jq '[.[] | select(.state=="open" and (.labe
 
 若未找到任何 issue，输出"未找到待处理的误报 issue"后退出。
 
+创建工作分支：
+在处理任何 issue 之前，先创建功能分支并切换到该分支，避免直接在主分支上提交：
+```bash
+BRANCH_NAME=fix/false-positive-issues-$(date +%Y%m%d-%H%M%S)
+git checkout -b $BRANCH_NAME
+```
+分支名称最终将在 Step 4 中根据实际通过的 issue 编号重命名，此处先创建临时分支用于隔离工作。
+
 ---
 
 ## Step 2：逐 issue 处理
@@ -62,7 +70,13 @@ gh api repos/{OWNER}/{REPO}/issues --jq '[.[] | select(.state=="open" and (.labe
 读取以下文件，理解现有误报模式和规则定义：
 
 - `skills/vibe-review/references/false-positives.md` — 已知误报模式
-- `skills/vibe-review/references/standards-project-ops-transformer.md` — 项目级规则（按需读相关章节）
+- 项目级规则文件（按需读相关章节）：根据 PR URL 中的仓库名选择对应的项目规则文件（与 vibe-review/SKILL.md 中的按仓库加载规则保持一致）：
+  - ops-transformer → `standards-project-ops-transformer.md`
+  - ops-nn → `standards-project-ops-nn.md`
+  - hccl / hcomm → `standards-project-hccl.md`
+  - 其他仓库 → 无额外项目规则文件
+
+  若对应的项目规则文件存在，读取它；若不存在，仅读取 false-positives.md 和 SKILL.md。
 - `skills/vibe-review/SKILL.md` — 仅阅读与该发现相关的规则章节（用 Grep 定位 rule_id）
 
 同时用 Grep 在仓库中搜索该代码位置，理解其真实语义。
@@ -111,7 +125,13 @@ gh api repos/{OWNER}/{REPO}/issues --jq '[.[] | select(.state=="open" and (.labe
 5. **FAIL 且未到第 3 轮：** 分析本轮失败原因，调整修改方案，重新执行修改后进入下一轮。**本轮不提交。**
 
 6. **FAIL 且已是第 3 轮：**
-   - 回滚所有未提交修改：`git checkout -- <修改的文件>`
+   - 回滚所有未提交修改：
+     ```bash
+     git checkout -- skills/vibe-review/references/false-positives.md \
+                     skills/vibe-review/references/standards-project-ops-transformer.md \
+                     skills/vibe-review/SKILL.md 2>/dev/null || true
+     ```
+     （`2>/dev/null || true` 处理文件未被修改的情况）
    - 在原始 issue 上发布失败注释：
      ```bash
      gh issue comment {N} --body "..."
@@ -154,12 +174,13 @@ gh api repos/{OWNER}/{REPO}/issues --jq '[.[] | select(.state=="open" and (.labe
 将通过的 issue 编号用 `-` 连接：
 
 ```bash
-ISSUE_NUMS={通过的issue编号，用-连接，如123-456}
-git checkout -b fix/false-positive-issues-${ISSUE_NUMS}
+# 将工作分支重命名为最终分支名
+ISSUE_NUMS={通过的 issue 编号，用-连接}
+git branch -m fix/false-positive-issues-${ISSUE_NUMS}
 git push origin fix/false-positive-issues-${ISSUE_NUMS}
 ```
 
-注意：各 issue 的提交已在 Step 2.4 完成，直接在当前分支上推送即可。若当前分支已有提交，先创建新分支再推送。
+注意：各 issue 的提交已在 Step 2.4 完成，直接在当前分支上推送即可。
 
 ### 4.2 创建 PR
 
@@ -190,7 +211,7 @@ Related #N2
 **PASS 格式（单轮）：**
 
 ```
-gh pr comment {PR_URL} --body "$(cat <<'EOF'
+gh pr comment {FIX_PR_URL} --body "$(cat <<'EOF'
 ## 验证报告：#{N}
 **误报**：`{location}` — {description}（{rule_id}）
 **修改位置**：`{file}`
@@ -217,7 +238,7 @@ EOF
 **FAIL 格式：**
 
 ```
-gh pr comment {PR_URL} --body "$(cat <<'EOF'
+gh pr comment {FIX_PR_URL} --body "$(cat <<'EOF'
 ## 验证报告：#{N}
 **误报**：`{location}` — {description}（{rule_id}）
 **验证结果**：❌ 失败（已迭代3轮，无法自动修复）
@@ -232,7 +253,7 @@ EOF
 )"
 ```
 
-失败的 issue 在 Step 2.4 步骤 6 已通过 `gh issue comment` 在原始 issue 上留言，此处在 PR 上再追加一条汇总。
+失败的 issue 在 Step 2.4 步骤 6 已通过 `gh issue comment` 在原始 issue 上留言，此处在 PR（`{FIX_PR_URL}` 即 Step 4.2 创建的修复 PR）上再追加一条汇总。
 
 ---
 
