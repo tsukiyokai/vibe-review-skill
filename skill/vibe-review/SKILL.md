@@ -28,38 +28,26 @@ $ARGUMENTS
 
 ### 始终加载
 
-| 文件                             | 内容               |
-| -------------------------------- | ------------------ |
-| references/standards-company.md  | 华为编码规范       |
-| references/standards-dept.md     | 算子编码红线及TOPN |
-| references/standards-personal.md | 个人审查习惯       |
+| 文件                              | 内容                     |
+| --------------------------------- | ------------------------ |
+| references/standards-company.md   | 华为编码规范             |
+| references/standards-dept.md      | 算子编码红线及TOPN       |
+| references/standards-personal.md  | 个人审查习惯             |
 
 ### 按仓库加载
 
-| 仓库            | 额外加载                                                                 |
-| --------------- | ------------------------------------------------------------------------ |
-| hccl, hcomm     | standards-productline-cann-cpp.md + standards-project-hccl.md            |
-| ops-transformer | standards-productline-cann-cpp.md + standards-project-ops-transformer.md |
-| ops-nn          | standards-productline-cann-cpp.md + standards-project-ops-nn.md          |
-| CANN其他仓      | standards-productline-cann-cpp.md                                        |
-| 非CANN          | （无额外标准）                                                           |
+| 仓库            | 额外加载                                                              |
+| --------------- | --------------------------------------------------------------------- |
+| hccl, hcomm     | standards-productline-cann-cpp.md + hccl/standards-project-hccl.md    |
+| ops-transformer | standards-productline-cann-cpp.md + ops-transformer/standards-project-ops-transformer.md |
+| ops-nn          | standards-productline-cann-cpp.md + ops-nn/standards-project-ops-nn.md |
+| torch_npu (PTA) | torch-npu/standards-project-torch-npu.md                              |
+| CANN其他仓      | standards-productline-cann-cpp.md                                     |
+| 非CANN          | （无额外标准）                                                        |
 
 ### 领域知识
 
-审查hccl/hcomm仓库时，若`~/repo/docs/hccl/`目录存在，可按需查阅其中的文档辅助理解业务语义：
-
-| 文件                                  | 内容                                        |
-| ------------------------------------- | ------------------------------------------- |
-| HCCL集合通信库使用指南.md             | HCCL综合性中文指南，覆盖使用流程和配置      |
-| Ascend C算子开发指南.md               | Ascend C算子开发全流程中文指南              |
-| user-guide.md                         | HCCL使用指南，理解集合通信整体流程          |
-| api-c.md / api-cpp.md / api-python.md | HCCL对外API规格，校验接口用法是否符合契约   |
-| ascendc-hccl.md                       | AscendC集成HCCL的方式，理解算子与通信的交互 |
-| env-vars.md                           | 环境变量定义，校验环境变量使用是否正确      |
-| faq.md                                | 常见问题，识别已知陷阱                      |
-| migration.md                          | 版本迁移指南，理解API演进和废弃路径         |
-
-使用方式：当审查中遇到不确定的API语义、通信流程、环境变量用途时，用Grep搜索相关关键词。不要主动全量加载这些文件。
+审查中遇到不确定的API语义、通信流程、环境变量用途等领域问题时，在仓库docs/目录下搜索相关关键词。
 
 ### 按需查阅
 
@@ -270,39 +258,6 @@ hcclStreamSynchronize(stream);  // 可阻塞60s+
 
 ---
 
-## C++命名规范速查
+命名风格判定原则: 风格连贯性优先于任何固定规范。修改文件时，与当前文件上下文风格保持一致；新建文件时，与当前目录或父目录下其他文件的命名风格保持一致。
 
-| 类型                    | 风格           | 示例                      |
-| ----------------------- | -------------- | ------------------------- |
-| 类/结构体/枚举/命名空间 | 大驼峰         | `UrlTable`, `FileUtils`   |
-| 函数                    | 大驼峰（动宾） | `AddElement`, `GetValue`  |
-| 局部变量/参数           | 小驼峰         | `tableName`, `bufferSize` |
-| 类成员变量              | 小驼峰+`_`     | `fileName_`, `isReady_`   |
-| 全局变量                | `g_`+小驼峰    | `g_activeConnectCount`    |
-| 宏/枚举值/全局const     | 全大写下划线   | `MAX_SIZE`                |
-| 文件名                  | 小写下划线     | `url_table.cpp`           |
-
-## C++禁用函数速查
-
-memcpy/bcopy→memcpy_s, memmove→memmove_s, memset→memset_s, strcpy/strncpy→strcpy_s/strncpy_s, strcat/strncat→strcat_s/strncat_s, sprintf/snprintf→sprintf_s/snprintf_s, vsprintf/vsnprintf→vsprintf_s/vsnprintf_s, scanf/sscanf/fscanf→scanf_s/sscanf_s/fscanf_s, gets→gets_s
-
-## Python PEP 8速查
-
-| 类型      | 风格         | 示例                           |
-| --------- | ------------ | ------------------------------ |
-| 模块/包   | 小写下划线   | `my_module`, `utils`           |
-| 类        | 大驼峰       | `MyClass`, `HTTPServer`        |
-| 函数/方法 | 小写下划线   | `get_value`, `calculate_sum`   |
-| 变量      | 小写下划线   | `total_count`, `file_path`     |
-| 常量      | 全大写下划线 | `MAX_RETRY`, `DEFAULT_TIMEOUT` |
-| 私有属性  | 前置下划线   | `_internal_state`              |
-| 名称修饰  | 双前置下划线 | `__private_method`             |
-
-Python常见反模式速查：
-- `except:`/`except Exception:` → 指定具体异常类型
-- `def f(x=[]):` → `def f(x=None): x = x or []`
-- `eval(user_input)` → 使用`ast.literal_eval`或白名单解析
-- `os.system(cmd)` → `subprocess.run([...], shell=False)`
-- `open(f)`无close → `with open(f) as fh:`
-- `== None` → `is None`
-- `type(x) == int` → `isinstance(x, int)`
+其他仓库相关的规则(禁用函数、错误处理模式等)由"按仓库加载"的标准文件提供。
